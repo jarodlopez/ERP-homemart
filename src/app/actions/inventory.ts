@@ -28,7 +28,7 @@ export async function createProductAction(formData: FormData) {
     category: formData.get('category') || 'General',
     imageUrl: formData.get('imageUrl') || '',
     status: 'active',
-    totalStock: 0, // Inicia en 0 hasta que hagas una entrada de inventario
+    totalStock: 0, 
     createdAt: new Date(),
     updatedAt: new Date()
   });
@@ -36,11 +36,11 @@ export async function createProductAction(formData: FormData) {
   // 4. Preparar datos del SKU (Hijo)
   batch.set(skuRef, {
     productId: productRef.id,
-    sku: skuCode.toUpperCase(), // Siempre mayúsculas
+    sku: skuCode.toUpperCase(), 
     barcode: formData.get('barcode') || '',
     name: fullSkuName,
-    price: Number(formData.get('price')), // Precio en C$
-    cost: Number(formData.get('cost')),   // Costo en C$
+    price: Number(formData.get('price')), 
+    cost: Number(formData.get('cost')),
     stock: 0,
     lowStockAlert: 5,
     attributes: {
@@ -53,10 +53,12 @@ export async function createProductAction(formData: FormData) {
     await batch.commit();
   } catch (error) {
     console.error("Error guardando producto:", error);
-    // Aquí podrías retornar un error, pero por simplicidad redirigimos
-    return { error: 'Error al guardar' };
+    // CORRECCIÓN: Lanzamos el error en lugar de retornarlo como objeto
+    // Esto satisface el tipo 'void' que espera el formulario
+    throw new Error("Error al guardar en base de datos");
   }
 
   // 6. Redirigir al listado
   redirect('/dashboard/inventory');
 }
+
