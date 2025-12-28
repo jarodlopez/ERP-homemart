@@ -12,7 +12,8 @@
     "firebase": "^10.7.1",
     "next": "latest",
     "react": "^18",
-    "react-dom": "^18"
+    "react-dom": "^18",
+    "lucide-react": "^0.300.0"
   },
   "devDependencies": {
     "@types/node": "^20",
@@ -24,3 +25,4 @@
     "typescript": "^5"
   }
 }
+
