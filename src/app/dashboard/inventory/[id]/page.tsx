@@ -1,6 +1,7 @@
 import { db } from '@/lib/firebase';
 import { doc, getDoc } from 'firebase/firestore';
 import Link from 'next/link';
+import { deleteProductAction } from '@/app/actions/inventory'; // Importamos la acción
 
 export const dynamic = 'force-dynamic';
 
@@ -51,7 +52,6 @@ export default async function ProductDetailPage({ params }: Props) {
   if (!product) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50 p-6 text-center">
-        <div className="w-16 h-16 bg-gray-200 rounded-full flex items-center justify-center mb-4 text-2xl">🕵️‍♂️</div>
         <h2 className="text-lg font-bold text-gray-800">Producto no encontrado</h2>
         <Link href="/dashboard/inventory" className="mt-6 bg-gray-800 text-white px-6 py-3 rounded-lg font-medium text-sm">
           Volver al Inventario
@@ -139,7 +139,7 @@ export default async function ProductDetailPage({ params }: Props) {
           )}
         </div>
 
-        {/* 3. Botones ACTIVADOS */}
+        {/* 3. Botones Acciones */}
         <div className="mt-8 grid grid-cols-2 gap-3">
             <Link 
               href={`/dashboard/inventory/${id}/edit`}
@@ -155,6 +155,20 @@ export default async function ProductDetailPage({ params }: Props) {
                Ajustar Stock
             </Link>
         </div>
+
+        {/* 4. BOTÓN BORRAR (NUEVO) */}
+        <div className="mt-12 border-t border-gray-100 pt-6">
+          <form action={deleteProductAction}>
+            <input type="hidden" name="id" value={product.id} />
+            <button 
+              type="submit"
+              className="w-full text-red-500 text-xs font-bold uppercase tracking-widest py-4 hover:bg-red-50 rounded-xl transition"
+            >
+              🗑️ Eliminar Producto
+            </button>
+          </form>
+        </div>
+
       </div>
     </div>
   );
