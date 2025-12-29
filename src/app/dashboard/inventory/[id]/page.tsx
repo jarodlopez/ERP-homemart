@@ -4,116 +4,129 @@ import Link from 'next/link';
 
 export const dynamic = 'force-dynamic';
 
-async function getSkuDetail(id: string) {
+async function getFullProductData(skuId: string) {
   try {
-    const docRef = doc(db, 'skus', id);
-    const docSnap = await getDoc(docRef);
-    if (docSnap.exists()) {
-      const data = docSnap.data();
-      // BLINDAJE: Si algún dato falta, ponemos un valor seguro
-      return { 
-        id: docSnap.id, 
-        name: data.name || 'Sin Nombre',
-        sku: data.sku || '---',
-        price: Number(data.price) || 0,
-        cost: Number(data.cost) || 0,
-        stock: Number(data.stock) || 0,
-        // Si no hay imagen, usamos una de placeholder gris
-        imageUrl: data.imageUrl || 'https://placehold.co/600x400?text=Sin+Foto',
-        barcode: data.barcode || 'N/A',
-        attributes: data.attributes || { variant: 'N/A' }
-      };
+    // 1. Buscamos el SKU (Hijo)
+    const skuRef = doc(db, 'skus', skuId);
+    const skuSnap = await getDoc(skuRef);
+    
+    if (!skuSnap.exists()) return null;
+    const skuData = skuSnap.data();
+
+    // 2. Buscamos el Producto Padre usando el productId que está en el SKU
+    let productData = {};
+    if (skuData.productId) {
+      const productRef = doc(db, 'products', skuData.productId);
+      const productSnap = await getDoc(productRef);
+      if (productSnap.exists()) {
+        productData = productSnap.data();
+      }
     }
-    return null;
+
+    // 3. Mezclamos todo en un solo objeto para la vista
+    return {
+      id: skuSnap.id,
+      sku: skuData.sku || '---',
+      name: skuData.name || 'Producto',
+      price: Number(skuData.price) || 0,
+      cost: Number(skuData.cost) || 0,
+      stock: Number(skuData.stock) || 0,
+      imageUrl: skuData.imageUrl || 'https://placehold.co/600x400?text=Sin+Imagen',
+      barcode: skuData.barcode || '---',
+      variant: skuData.attributes?.variant || 'Única',
+      // Datos del Padre
+      brand: (productData as any).brand || 'Genérico',
+      category: (productData as any).category || 'General',
+      description: (productData as any).description || ''
+    };
   } catch (error) {
-    console.error("Error al obtener detalle:", error);
+    console.error("Error obteniendo datos:", error);
     return null;
   }
 }
 
 export default async function ProductDetailPage({ params }: { params: { id: string } }) {
-  const sku = await getSkuDetail(params.id);
+  const product = await getFullProductData(params.id);
 
-  if (!sku) {
+  if (!product) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50 p-4">
-        <div className="text-4xl mb-2">😕</div>
-        <p className="text-gray-600 font-bold">Producto no encontrado</p>
-        <Link href="/dashboard/inventory" className="mt-4 text-blue-600 underline">Volver al inventario</Link>
+      <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50 p-4 text-center">
+        <div className="text-4xl mb-2">🕵️‍♂️</div>
+        <h2 className="text-xl font-bold text-gray-800">Producto no encontrado</h2>
+        <p className="text-sm text-gray-500 mt-1 mb-6">El ID {params.id} no existe en la base de datos.</p>
+        <Link href="/dashboard/inventory" className="bg-blue-600 text-white px-6 py-3 rounded-xl font-bold">
+          Volver al Listado
+        </Link>
       </div>
     );
   }
 
   return (
     <div className="bg-white min-h-screen pb-20">
-      {/* Imagen Grande con Botón de Regreso */}
-      <div className="h-72 bg-gray-200 relative w-full">
+      {/* Imagen Grande */}
+      <div className="h-72 bg-gray-100 relative w-full group">
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img 
-          src={sku.imageUrl} 
-          alt={sku.name} 
-          className="w-full h-full object-cover" 
-        />
-        {/* Degradado para que se vea el botón de atrás */}
-        <div className="absolute top-0 left-0 w-full h-20 bg-gradient-to-b from-black/50 to-transparent"></div>
+        <img src={product.imageUrl} alt={product.name} className="w-full h-full object-cover" />
         
-        <Link href="/dashboard/inventory" className="absolute top-4 left-4 bg-white/20 backdrop-blur-md text-white p-2 rounded-full shadow-sm hover:bg-white/40 transition">
-          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-6 h-6">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
-          </svg>
+        {/* Botón Volver Flotante */}
+        <Link href="/dashboard/inventory" className="absolute top-4 left-4 bg-black/30 backdrop-blur-md text-white p-2 rounded-full hover:bg-black/50 transition">
+          <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
         </Link>
       </div>
 
-      <div className="p-6 -mt-8 bg-white rounded-t-[30px] relative z-10 shadow-lg min-h-[500px]">
-        {/* Cabecera del Producto */}
-        <div className="flex justify-between items-start mb-4">
-          <div className="max-w-[70%]">
-            <span className="bg-blue-100 text-blue-700 text-[10px] px-2 py-1 rounded-md font-bold uppercase tracking-wider">
-              SKU: {sku.sku}
-            </span>
-            <h1 className="text-2xl font-bold text-gray-900 mt-2 leading-tight">{sku.name}</h1>
+      <div className="p-6 -mt-8 bg-white rounded-t-[30px] relative z-10 shadow-xl min-h-[500px]">
+        
+        {/* Cabecera */}
+        <div className="flex justify-between items-start mb-2">
+          <div className="flex-1 pr-4">
+             <div className="flex gap-2 mb-2">
+                <span className="bg-blue-100 text-blue-700 text-[10px] px-2 py-1 rounded font-bold uppercase tracking-wider">{product.brand}</span>
+                <span className="bg-gray-100 text-gray-600 text-[10px] px-2 py-1 rounded font-bold uppercase tracking-wider">{product.category}</span>
+             </div>
+             <h1 className="text-2xl font-bold text-gray-900 leading-tight">{product.name}</h1>
           </div>
           <div className="text-right">
-            <p className="text-xs text-gray-400 uppercase font-bold mb-1">Precio</p>
-            <p className="text-2xl font-black text-blue-600">C${sku.price.toFixed(2)}</p>
+             <p className="text-3xl font-black text-blue-600 tracking-tight">
+               <span className="text-sm font-normal text-gray-400 mr-1">C$</span>
+               {product.price.toFixed(2)}
+             </p>
           </div>
         </div>
 
-        {/* Grid de Estadísticas */}
-        <div className="grid grid-cols-2 gap-4 mt-8 py-6 border-t border-b border-gray-100">
-          <div className="text-center p-2">
-            <p className="text-gray-400 text-xs uppercase font-bold mb-1">Stock Disponible</p>
-            <p className={`text-2xl font-bold ${sku.stock > 0 ? 'text-gray-800' : 'text-red-500'}`}>
-              {sku.stock}
+        {/* Stock y Costo */}
+        <div className="grid grid-cols-2 gap-4 mt-6 py-6 border-t border-b border-gray-100">
+          <div className="text-center">
+            <p className="text-gray-400 text-[10px] uppercase font-bold mb-1">Stock Disponible</p>
+            <p className={`text-2xl font-bold ${product.stock > 0 ? 'text-gray-800' : 'text-red-500'}`}>
+              {product.stock}
             </p>
           </div>
-          <div className="text-center p-2 border-l border-gray-100">
-            <p className="text-gray-400 text-xs uppercase font-bold mb-1">Costo Unitario</p>
-            <p className="text-2xl font-bold text-gray-800">C${sku.cost.toFixed(2)}</p>
+          <div className="text-center border-l border-gray-100">
+            <p className="text-gray-400 text-[10px] uppercase font-bold mb-1">Variante</p>
+            <p className="text-lg font-bold text-gray-800 truncate px-2">{product.variant}</p>
           </div>
         </div>
 
-        {/* Detalles Adicionales */}
+        {/* Detalles Técnicos */}
         <div className="mt-8 space-y-4">
-          <h3 className="font-bold text-gray-900 text-lg">Información Adicional</h3>
+          <h3 className="font-bold text-gray-900">Detalles del Producto</h3>
           
-          <div className="bg-gray-50 p-4 rounded-xl space-y-3">
+          <div className="bg-gray-50 rounded-xl p-4 space-y-3 text-sm">
             <div className="flex justify-between">
-              <span className="text-gray-500 text-sm">Variante</span>
-              <span className="text-gray-800 font-medium text-sm">{typeof sku.attributes === 'object' ? (sku.attributes as any).variant : 'N/A'}</span>
+              <span className="text-gray-500">SKU Interno</span>
+              <span className="font-mono font-medium text-gray-900">{product.sku}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-gray-500 text-sm">Código de Barras</span>
-              <span className="text-gray-800 font-medium text-sm font-mono">{sku.barcode}</span>
+              <span className="text-gray-500">Código de Barras</span>
+              <span className="font-mono font-medium text-gray-900">{product.barcode}</span>
             </div>
+            {product.description && (
+              <div className="pt-2 border-t border-gray-200 mt-2">
+                <p className="text-gray-500 mb-1">Descripción:</p>
+                <p className="text-gray-800 leading-relaxed">{product.description}</p>
+              </div>
+            )}
           </div>
-        </div>
-
-        {/* Botón de Acción (Simulado) */}
-        <div className="mt-10">
-          <button className="w-full bg-gray-900 text-white font-bold py-4 rounded-xl shadow-lg active:scale-95 transition">
-            Editar Producto
-          </button>
         </div>
       </div>
     </div>
