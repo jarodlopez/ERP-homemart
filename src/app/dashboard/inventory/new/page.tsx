@@ -34,27 +34,33 @@ export default function NewProductPage() {
           </div>
         </div>
 
-        {/* Datos SKU */}
+        {/* Datos SKU e Inventario */}
         <div className="bg-white p-5 rounded-2xl shadow-sm space-y-4 border-l-4 border-blue-500">
-          <h2 className="text-xs font-bold uppercase text-blue-600">Catálogo (SKU)</h2>
+          <h2 className="text-xs font-bold uppercase text-blue-600">Venta e Inventario</h2>
           
           <input name="sku" type="text" required placeholder="CÓDIGO SKU" className="w-full p-3 border-2 border-gray-200 rounded-xl uppercase text-center tracking-widest font-bold" />
           <input name="variantDetail" type="text" placeholder="Variante (ej: Rojo XL)" className="w-full p-3 bg-gray-50 border rounded-xl" />
           
+          {/* CAMBIO AQUI: Stock Inicial agregado */}
+          <div>
+            <label className="text-xs font-bold text-gray-500 uppercase ml-1">Stock Inicial</label>
+            <input name="initialStock" type="number" required min="0" placeholder="0" className="w-full p-3 bg-blue-50 border border-blue-100 text-blue-800 font-bold rounded-xl text-lg" />
+          </div>
+
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="text-xs text-gray-500">Precio Venta (C$)</label>
+              <label className="text-xs text-gray-500 ml-1">Precio Venta (C$)</label>
               <input name="price" type="number" step="0.01" required className="w-full p-3 bg-green-50 border border-green-200 text-green-800 font-bold rounded-xl text-lg" placeholder="0.00" />
             </div>
             <div>
-              <label className="text-xs text-gray-500">Costo</label>
+              <label className="text-xs text-gray-500 ml-1">Costo</label>
               <input name="cost" type="number" step="0.01" className="w-full p-3 bg-gray-50 border rounded-xl" placeholder="0.00" />
             </div>
           </div>
         </div>
 
         <button type="submit" disabled={loading} className="w-full bg-blue-600 text-white font-bold py-4 rounded-xl shadow-lg flex justify-center">
-          {loading ? 'Subiendo fotos...' : 'Guardar Catálogo'}
+          {loading ? 'Guardando...' : 'Guardar Producto'}
         </button>
       </form>
     </div>
