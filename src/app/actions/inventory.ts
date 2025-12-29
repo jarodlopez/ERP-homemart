@@ -1,7 +1,8 @@
 'use server'
 
 import { db } from '@/lib/firebase';
-import { collection, doc, writeBatch, updateDoc } from 'firebase/firestore';
+// AQUI AGREGUE 'deleteDoc'
+import { collection, doc, writeBatch, updateDoc, deleteDoc } from 'firebase/firestore';
 import { redirect } from 'next/navigation';
 
 // Tu API Key de ImgBB
@@ -148,3 +149,20 @@ export async function updateProductAction(formData: FormData) {
   redirect(`/dashboard/inventory/${id}`);
 }
 
+// --- ACCIÓN 4: ELIMINAR PRODUCTO (AGREGADA) ---
+export async function deleteProductAction(formData: FormData) {
+  const id = formData.get('id') as string;
+  if (!id) return;
+
+  const skuRef = doc(db, 'skus', id);
+  
+  try {
+    await deleteDoc(skuRef);
+  } catch (error) {
+    console.error("Error al borrar:", error);
+    throw new Error("No se pudo borrar");
+  }
+  
+  redirect('/dashboard/inventory');
+}
+ 
