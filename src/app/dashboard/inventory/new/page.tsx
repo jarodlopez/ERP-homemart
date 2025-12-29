@@ -66,14 +66,34 @@ export default function NewProductPage() {
           </div>
         </div>
 
-        {/* DATOS GENERALES */}
+        {/* DATOS GENERALES (AQUÍ AGREGUÉ LA DESCRIPCIÓN) */}
         <div className="bg-white p-5 rounded-2xl shadow-sm space-y-4">
           <h2 className="text-xs font-bold uppercase text-gray-400">Información Básica</h2>
-          <input name="name" type="text" required placeholder="Nombre del Producto" className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white transition outline-none focus:ring-2 focus:ring-blue-100" />
+          
+          <div>
+            <label className="text-[10px] font-bold text-gray-500 uppercase mb-1 block">Nombre</label>
+            <input name="name" type="text" required placeholder="Ej: Termo Owala 24oz" className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white transition outline-none focus:ring-2 focus:ring-blue-100" />
+          </div>
+
+          <div>
+             <label className="text-[10px] font-bold text-gray-500 uppercase mb-1 block">Descripción (Para Ecommerce)</label>
+             <textarea 
+               name="description" 
+               rows={3} 
+               placeholder="Detalles del producto, materiales, beneficios..." 
+               className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white transition outline-none focus:ring-2 focus:ring-blue-100 resize-none"
+             ></textarea>
+          </div>
           
           <div className="grid grid-cols-2 gap-3">
-            <input name="brand" type="text" placeholder="Marca" className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl outline-none" />
-            <input name="category" type="text" placeholder="Categoría" className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl outline-none" />
+            <div>
+              <label className="text-[10px] font-bold text-gray-500 uppercase mb-1 block">Marca</label>
+              <input name="brand" type="text" placeholder="Ej: Owala" className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl outline-none" />
+            </div>
+            <div>
+              <label className="text-[10px] font-bold text-gray-500 uppercase mb-1 block">Categoría</label>
+              <input name="category" type="text" placeholder="Ej: Hogar" className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl outline-none" />
+            </div>
           </div>
         </div>
 
@@ -102,7 +122,6 @@ export default function NewProductPage() {
                 className="absolute right-1 top-1 bottom-1 w-10 bg-gray-800 text-white rounded-lg flex items-center justify-center shadow-sm active:scale-95 transition"
                 title="Abrir cámara"
               >
-                {/* Icono de código de barras */}
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 013.75 9.375v-4.5zM3.75 14.625c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5a1.125 1.125 0 01-1.125-1.125v-4.5zM13.5 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 0113.5 9.375v-4.5z" />
                   <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 6.75h.75v.75h-.75v-.75zM6.75 16.5h.75v.75h-.75v-.75zM16.5 6.75h.75v.75h-.75v-.75zM13.5 13.5h.75v.75h-.75v-.75zM13.5 19.5h.75v.75h-.75v-.75zM19.5 13.5h.75v.75h-.75v-.75zM19.5 19.5h.75v.75h-.75v-.75zM16.5 16.5h.75v.75h-.75v-.75z" />
@@ -149,4 +168,4 @@ export default function NewProductPage() {
     </div>
   );
 }
- 
+
