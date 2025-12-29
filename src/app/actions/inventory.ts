@@ -4,7 +4,6 @@ import { db } from '@/lib/firebase';
 import { collection, doc, writeBatch } from 'firebase/firestore';
 import { redirect } from 'next/navigation';
 
-// Tu API Key real
 const IMGBB_API_KEY = 'b922654effe3a1ab5ac85cc4c23f97b8';
 
 async function uploadToImgBB(file: File): Promise<string> {
@@ -40,14 +39,17 @@ export async function createProductAction(formData: FormData) {
     }
   }
 
-  // Si no subió foto, ponemos una por defecto
   const mainImage = imageUrls.length > 0 ? imageUrls[0] : 'https://placehold.co/400?text=No+Image';
 
+  // 2. Datos del Formulario
   const name = formData.get('name') as string;
   const brand = formData.get('brand') as string;
   const variant = formData.get('variantDetail') as string || 'Estándar';
+  
+  // CAMBIO: Capturamos el stock inicial
+  const initialStock = Number(formData.get('initialStock')) || 0;
 
-  // 2. Guardar Padre
+  // 3. Guardar Padre (Sumamos el stock inicial al total)
   batch.set(productRef, {
     name,
     brand,
@@ -55,11 +57,12 @@ export async function createProductAction(formData: FormData) {
     category: formData.get('category') || 'General',
     images: imageUrls,
     status: 'active',
+    totalStock: initialStock, // <--- Stock impacta al padre
     createdAt: new Date(),
     updatedAt: new Date()
   });
 
-  // 3. Guardar SKU (Catálogo)
+  // 4. Guardar SKU (Guardamos el stock inicial)
   batch.set(skuRef, {
     productId: productRef.id,
     sku: (formData.get('sku') as string).toUpperCase(),
@@ -67,7 +70,7 @@ export async function createProductAction(formData: FormData) {
     name: `${name} - ${variant}`,
     price: Number(formData.get('price')),
     cost: Number(formData.get('cost')),
-    stock: 0, // El stock se queda en 0, se gestionará en el módulo de Inventario
+    stock: initialStock, // <--- Stock impacta al hijo
     attributes: { variant },
     imageUrl: mainImage
   });
@@ -80,4 +83,4 @@ export async function createProductAction(formData: FormData) {
 
   redirect('/dashboard/inventory');
 }
-
+ 
