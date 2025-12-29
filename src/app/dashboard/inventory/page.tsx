@@ -2,7 +2,7 @@ import { db } from '@/lib/firebase';
 import { collection, getDocs, query } from 'firebase/firestore';
 import Link from 'next/link';
 
-// Obligamos a que la página se regenere en cada visita para ver datos frescos
+// Forzamos regeneración de datos siempre
 export const dynamic = 'force-dynamic';
 
 async function getInventory() {
@@ -12,14 +12,18 @@ async function getInventory() {
     
     return querySnapshot.docs.map(doc => {
       const data = doc.data();
+      
+      // BLINDAJE DE DATOS: Usamos "||" para valores por defecto si algo falta
       return {
         id: doc.id,
-        name: data.name || 'Sin Nombre',
+        name: data.name || 'Producto sin nombre',
         sku: data.sku || '---',
-        price: data.price || 0,
-        stock: data.stock || 0,
-        imageUrl: data.imageUrl || '', // Importante para la miniatura
-        attributes: data.attributes || {}
+        // Forzamos que sea número, si falla devuelve 0
+        price: Number(data.price) || 0,
+        stock: Number(data.stock) || 0,
+        imageUrl: data.imageUrl || '', 
+        // Si attributes no existe, devolvemos objeto vacío para que no rompa el .join()
+        attributes: data.attributes || {} 
       };
     });
   } catch (error) {
@@ -55,7 +59,7 @@ export default async function InventoryPage() {
             <p className="text-sm text-gray-500">Toca el botón + para empezar.</p>
           </div>
         ) : (
-          /* Lista de Tarjetas Clickeables */
+          /* Lista de Tarjetas */
           skus.map((item) => (
             <Link key={item.id} href={`/dashboard/inventory/${item.id}`} className="block">
               <div className="bg-white p-3 rounded-xl shadow-sm border border-gray-100 flex items-center active:bg-gray-50 transition">
@@ -78,11 +82,15 @@ export default async function InventoryPage() {
                     </span>
                   </div>
                   <h3 className="font-semibold text-gray-800 truncate text-sm mt-0.5">{item.name}</h3>
+                  {/* BLINDAJE VISUAL: Verificamos si hay atributos antes de intentar mostrarlos */}
+                  <p className="text-[10px] text-gray-400 truncate">
+                    {item.attributes ? Object.values(item.attributes).join(' • ') : ''}
+                  </p>
                 </div>
 
                 {/* Precio y Stock Derecha */}
                 <div className="text-right pl-2 ml-2 border-l border-gray-50">
-                  <div className="text-blue-600 font-bold text-sm whitespace-nowrap">C$ {Number(item.price).toFixed(2)}</div>
+                  <div className="text-blue-600 font-bold text-sm whitespace-nowrap">C$ {item.price.toFixed(2)}</div>
                   <div className={`text-[10px] font-bold mt-0.5 ${item.stock === 0 ? 'text-red-500' : 'text-green-600'}`}>
                     {item.stock === 0 ? 'AGOTADO' : `${item.stock} unds`}
                   </div>
