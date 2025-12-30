@@ -4,21 +4,27 @@ import { useState, useEffect, useRef } from 'react';
 import { searchProductsAction } from '@/app/actions/pos';
 import { usePosStore } from '@/store/posStore';
 import BarcodeScanner from '@/components/BarcodeScanner';
-import CheckoutModal from '@/components/pos/CheckoutModal'; // <--- IMPORT NUEVO
+import CheckoutModal from '@/components/pos/CheckoutModal';
 
 export default function PosInterface({ session }: { session: any }) {
-  // --- ESTADOS LOCALES ---
   const [searchTerm, setSearchTerm] = useState('');
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [showScanner, setShowScanner] = useState(false);
-  const [showCheckout, setShowCheckout] = useState(false); // <--- ESTADO PARA MODAL
+  const [showCheckout, setShowCheckout] = useState(false);
   
-  // --- ESTADOS GLOBALES ---
-  const { cart, addToCart, removeFromCart, updateQuantity, getTotal, getItemCount } = usePosStore();
+  // Zustand con persistencia requiere rehidratación manual en UI para evitar flash
+  const { cart, addToCart, removeFromCart, updateQuantity, getTotal, getItemCount, clearCart } = usePosStore();
+  const [isClient, setIsClient] = useState(false);
+
+  useEffect(() => {
+    usePosStore.persist.rehydrate();
+    setIsClient(true);
+  }, []);
+  
   const searchInputRef = useRef<HTMLInputElement>(null);
 
-  // Debounce de búsqueda
+  // Debounce
   useEffect(() => {
     const delayDebounceFn = setTimeout(async () => {
       if (searchTerm.length > 1) {
@@ -48,19 +54,22 @@ export default function PosInterface({ session }: { session: any }) {
     setIsSearching(false);
   };
 
+  // Evitar renderizado hasta que el cliente esté listo (fix persistencia)
+  if (!isClient) return <div className="h-screen bg-white"></div>;
+
   return (
     <div className="h-[calc(100vh-80px)] flex flex-col bg-white">
       
       {/* 1. BARRA SUPERIOR */}
-      <div className="p-3 border-b border-gray-100 flex gap-2 sticky top-0 bg-white z-20 shadow-sm">
+      <div className="p-3 border-b border-gray-100 flex gap-2 sticky top-0 bg-white z-20 shadow-sm items-center">
         <div className="relative flex-1">
           <input
             ref={searchInputRef}
             type="text"
-            placeholder="🔍 Buscar nombre, SKU o barras..."
+            placeholder="🔍 Buscar o escanear..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full bg-gray-100 text-gray-800 text-sm py-3 px-4 rounded-lg outline-none focus:bg-white focus:ring-2 focus:ring-blue-500 transition font-medium border border-transparent focus:border-blue-100"
+            className="w-full bg-gray-100 text-gray-800 text-sm py-3 px-4 rounded-xl outline-none focus:bg-white focus:ring-2 focus:ring-blue-500 transition font-medium border border-transparent focus:border-blue-100"
             autoFocus
           />
           {isSearching && (
@@ -71,18 +80,28 @@ export default function PosInterface({ session }: { session: any }) {
         </div>
         <button 
           onClick={() => setShowScanner(true)}
-          className="bg-gray-800 text-white px-4 rounded-lg flex items-center justify-center active:scale-95 transition shadow-md"
+          className="w-11 h-11 bg-gray-800 text-white rounded-xl flex items-center justify-center active:scale-95 transition shadow-md"
+          title="Abrir Escáner"
         >
           📷
         </button>
+        
+        {/* BOTÓN CANCELAR VENTA (PAPELERA) */}
+        {cart.length > 0 && (
+            <button 
+            onClick={() => {
+                if(confirm('¿Estás seguro de vaciar el carrito?')) clearCart();
+            }}
+            className="w-11 h-11 bg-red-50 text-red-500 border border-red-100 rounded-xl flex items-center justify-center active:scale-95 transition"
+            title="Cancelar Venta"
+            >
+            🗑️
+            </button>
+        )}
       </div>
 
-      {/* MODALES */}
-      {showScanner && (
-        <BarcodeScanner onScanSuccess={handleScan} onClose={() => setShowScanner(false)} />
-      )}
+      {showScanner && <BarcodeScanner onScanSuccess={handleScan} onClose={() => setShowScanner(false)} />}
       
-      {/* AQUÍ ESTÁ LA MAGIA: EL MODAL DE CHECKOUT */}
       {showCheckout && (
         <CheckoutModal 
           session={session}
@@ -134,21 +153,31 @@ export default function PosInterface({ session }: { session: any }) {
             ) : (
               <div className="divide-y divide-gray-100">
                 <div className="px-4 py-2 bg-gray-50 text-[10px] text-gray-400 font-bold uppercase tracking-wider flex justify-between sticky top-0 z-10 shadow-sm">
-                  <span>Detalle</span>
+                  <span>Detalle ({getItemCount()} items)</span>
                   <span>Subtotal</span>
                 </div>
                 {cart.map((item) => (
-                  <div key={item.id} className="p-4 flex justify-between items-center bg-white">
+                  <div key={item.id} className="p-4 flex justify-between items-start bg-white group">
                     <div className="flex-1 pr-4">
                       <p className="font-bold text-gray-800 text-sm leading-tight mb-1">{item.name}</p>
-                      <p className="text-blue-600 text-xs font-bold">PU: C$ {item.price.toFixed(2)}</p>
+                      <div className="flex items-center gap-2">
+                        <p className="text-blue-600 text-xs font-bold">C$ {item.price.toFixed(2)}</p>
+                        {/* Botón Eliminar Individual */}
+                        <button 
+                            onClick={() => removeFromCart(item.id)}
+                            className="text-[10px] text-red-400 font-bold uppercase hover:text-red-600 underline decoration-dotted"
+                        >
+                            Eliminar
+                        </button>
+                      </div>
                     </div>
+                    
                     <div className="flex items-center gap-3 bg-gray-100 rounded-lg p-1">
-                      <button onClick={() => item.quantity === 1 ? removeFromCart(item.id) : updateQuantity(item.id, -1)} className="w-8 h-8 flex items-center justify-center bg-white text-gray-600 font-bold rounded shadow-sm">-</button>
+                      <button onClick={() => updateQuantity(item.id, -1)} className="w-8 h-8 flex items-center justify-center bg-white text-gray-600 font-bold rounded shadow-sm border border-gray-200 active:scale-90">-</button>
                       <span className="w-6 text-center font-bold text-gray-800 text-sm">{item.quantity}</span>
                       <button 
                         onClick={() => updateQuantity(item.id, 1)}
-                        className={`w-8 h-8 flex items-center justify-center text-white font-bold rounded shadow-sm ${item.quantity >= item.stock ? 'bg-gray-300' : 'bg-blue-600'}`}
+                        className={`w-8 h-8 flex items-center justify-center text-white font-bold rounded shadow-sm active:scale-90 ${item.quantity >= item.stock ? 'bg-gray-300 cursor-not-allowed' : 'bg-blue-600'}`}
                         disabled={item.quantity >= item.stock}
                       >+</button>
                     </div>
@@ -168,7 +197,7 @@ export default function PosInterface({ session }: { session: any }) {
               <p>Turno: <span className="font-mono bg-gray-100 px-1 rounded">#{session.id.slice(-5).toUpperCase()}</span></p>
             </div>
             <div className="text-right">
-              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-0.5">Total a Pagar</p>
+              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-0.5">Subtotal</p>
               <p className="text-3xl font-black text-gray-900 leading-none tracking-tight">
                 <span className="text-lg text-gray-400 mr-1 font-bold align-top mt-1 inline-block">C$</span>
                 {getTotal().toFixed(2)}
@@ -177,7 +206,7 @@ export default function PosInterface({ session }: { session: any }) {
          </div>
          
          <button 
-           onClick={() => setShowCheckout(true)} // <--- ESTO ABRE EL MODAL
+           onClick={() => setShowCheckout(true)}
            className="w-full bg-green-600 text-white font-bold py-4 rounded-xl text-lg shadow-lg shadow-green-200 active:scale-[0.98] transition flex justify-between px-6 items-center disabled:opacity-50 disabled:cursor-not-allowed hover:bg-green-700"
            disabled={cart.length === 0}
          >
