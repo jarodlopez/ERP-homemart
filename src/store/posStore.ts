@@ -1,12 +1,12 @@
 import { create } from 'zustand';
+import { persist, createJSONStorage } from 'zustand/middleware';
 
-// Definimos la estructura de un ítem en el carrito
 export interface CartItem {
-  id: string;      // ID del SKU
+  id: string;
   name: string;
   price: number;
   quantity: number;
-  stock: number;   // Stock máximo disponible
+  stock: number;
 }
 
 interface PosState {
@@ -15,71 +15,77 @@ interface PosState {
   removeFromCart: (id: string) => void;
   updateQuantity: (id: string, delta: number) => void;
   clearCart: () => void;
-  // Funciones para obtener datos calculados
   getTotal: () => number;
   getItemCount: () => number;
 }
 
-export const usePosStore = create<PosState>((set, get) => ({
-  cart: [],
+export const usePosStore = create<PosState>()(
+  persist(
+    (set, get) => ({
+      cart: [],
 
-  addToCart: (product) => {
-    const { cart } = get();
-    const exists = cart.find((item) => item.id === product.id);
+      addToCart: (product) => {
+        const { cart } = get();
+        const exists = cart.find((item) => item.id === product.id);
 
-    if (exists) {
-      // Si ya existe, sumamos 1 solo si hay stock
-      if (exists.quantity < exists.stock) {
-        set({
-          cart: cart.map((item) =>
-            item.id === product.id ? { ...item, quantity: item.quantity + 1 } : item
-          ),
-        });
-      }
-    } else {
-      // Si es nuevo, lo agregamos con cantidad 1
-      set({
-        cart: [
-          ...cart,
-          {
-            id: product.id,
-            name: product.name,
-            price: Number(product.price),
-            quantity: 1,
-            stock: Number(product.stock),
-          },
-        ],
-      });
-    }
-  },
-
-  removeFromCart: (id) => {
-    set({ cart: get().cart.filter((item) => item.id !== id) });
-  },
-
-  updateQuantity: (id, delta) => {
-    const { cart } = get();
-    set({
-      cart: cart.map((item) => {
-        if (item.id === id) {
-          const newQty = item.quantity + delta;
-          // Validamos que no baje de 1 y no supere el stock real
-          if (newQty > 0 && newQty <= item.stock) {
-            return { ...item, quantity: newQty };
+        if (exists) {
+          if (exists.quantity < exists.stock) {
+            set({
+              cart: cart.map((item) =>
+                item.id === product.id ? { ...item, quantity: item.quantity + 1 } : item
+              ),
+            });
           }
+        } else {
+          set({
+            cart: [
+              ...cart,
+              {
+                id: product.id,
+                name: product.name,
+                price: Number(product.price),
+                quantity: 1,
+                stock: Number(product.stock),
+              },
+            ],
+          });
         }
-        return item;
-      }),
-    });
-  },
+      },
 
-  clearCart: () => set({ cart: [] }),
+      removeFromCart: (id) => {
+        set({ cart: get().cart.filter((item) => item.id !== id) });
+      },
 
-  getTotal: () => {
-    return get().cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
-  },
+      updateQuantity: (id, delta) => {
+        const { cart } = get();
+        set({
+          cart: cart.map((item) => {
+            if (item.id === id) {
+              const newQty = item.quantity + delta;
+              if (newQty > 0 && newQty <= item.stock) {
+                return { ...item, quantity: newQty };
+              }
+            }
+            return item;
+          }),
+        });
+      },
 
-  getItemCount: () => {
-    return get().cart.reduce((sum, item) => sum + item.quantity, 0);
-  }
-}));
+      clearCart: () => set({ cart: [] }),
+
+      getTotal: () => {
+        return get().cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
+      },
+
+      getItemCount: () => {
+        return get().cart.reduce((sum, item) => sum + item.quantity, 0);
+      }
+    }),
+    {
+      name: 'pos-cart-storage', // Nombre único en LocalStorage
+      storage: createJSONStorage(() => localStorage), // Usamos LocalStorage
+      skipHydration: true, // Evita errores de hidratación en Next.js (manejado en UI)
+    }
+  )
+);
+
