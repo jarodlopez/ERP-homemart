@@ -1,10 +1,11 @@
+
 'use server'
 
 import { db } from '@/lib/firebase';
 import { collection, addDoc, query, where, getDocs, Timestamp } from 'firebase/firestore';
 import { revalidatePath } from 'next/cache';
 
-// --- VERIFICAR SI HAY TURNO ABIERTO ---
+// --- 1. VERIFICAR SI HAY TURNO ABIERTO ---
 export async function checkActiveSession(userId: string) {
   try {
     const q = query(
@@ -15,9 +16,16 @@ export async function checkActiveSession(userId: string) {
     const snapshot = await getDocs(q);
     
     if (!snapshot.empty) {
-      // Retornamos el ID de la sesión y la fecha de apertura
+      // Retornamos el ID de la sesión y sus datos
       const doc = snapshot.docs[0];
-      return { id: doc.id, ...doc.data() };
+      const data = doc.data();
+      
+      // Convertimos timestamps a string/number para evitar error de serialización en Client Components
+      return { 
+        id: doc.id, 
+        ...data,
+        openedAt: data.openedAt ? data.openedAt.toMillis() : Date.now() 
+      };
     }
     return null;
   } catch (error) {
@@ -26,7 +34,7 @@ export async function checkActiveSession(userId: string) {
   }
 }
 
-// --- ABRIR CAJA (NUEVO TURNO) ---
+// --- 2. ABRIR CAJA (NUEVO TURNO) ---
 export async function openSessionAction(formData: FormData) {
   const userId = formData.get('userId') as string;
   const userName = formData.get('userName') as string;
@@ -50,9 +58,39 @@ export async function openSessionAction(formData: FormData) {
     finalCash: null,
     difference: 0,
     status: 'open',
-    storeId: 'sucursal_principal' // Hardcodeado por ahora, útil para el futuro
+    storeId: 'sucursal_principal'
   });
 
   // Recargamos la ruta para que la UI detecte el cambio
   revalidatePath('/dashboard/sales');
+}
+
+// --- 3. BUSCAR PRODUCTOS (POS) ---
+export async function searchProductsAction(term: string) {
+  if (!term || term.length < 2) return [];
+
+  try {
+    const productsRef = collection(db, 'skus');
+    const snapshot = await getDocs(productsRef);
+    
+    const termLower = term.toLowerCase();
+
+    // Filtramos en memoria (eficiente para inventarios pequeños/medianos)
+    const results = snapshot.docs
+      .map(doc => ({ id: doc.id, ...doc.data() } as any))
+      .filter(item => {
+        // Buscamos coincidencia en Nombre, SKU o Código de Barras
+        return (
+          (item.name && item.name.toLowerCase().includes(termLower)) ||
+          (item.sku && item.sku.toLowerCase().includes(termLower)) ||
+          (item.barcode && item.barcode.includes(term))
+        );
+      })
+      .slice(0, 10); // Máximo 10 resultados para no saturar la vista
+
+    return results;
+  } catch (error) {
+    console.error("Error buscando:", error);
+    return [];
+  }
 }
