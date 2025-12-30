@@ -81,9 +81,10 @@ export default function CheckoutModal({ session, onClose, onSuccess }: Props) {
 
     if (result.success) {
       // 1. Guardamos la "foto" de la venta para el recibo
+      // CORRECCIÓN AQUÍ: (result as any) para calmar a TypeScript en Vercel
       setFinalizedSale({
           ...saleData,
-          saleId: result.saleId // ID generado por el server (HM...)
+          saleId: (result as any).saleId 
       });
       
       // 2. Limpiamos el carrito del store
@@ -92,6 +93,7 @@ export default function CheckoutModal({ session, onClose, onSuccess }: Props) {
       // 3. Pasamos a pantalla de éxito
       setStep('success');
     } else {
+      // CORRECCIÓN AQUÍ TAMBIÉN: (result as any)
       alert(`Error: ${(result as any).error || 'Error desconocido'}`);
     }
     setLoading(false);
