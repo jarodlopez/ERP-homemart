@@ -1,13 +1,13 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
-import "./globals.css"; // Asegúrate de que este archivo exista por defecto en Next.js
+import "./globals.css";
 import { AuthProvider } from "@/context/AuthContext";
 
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "ERP Inventory Mobile",
-  description: "Sistema de gestión integral",
+  title: "ERP HomeMart",
+  description: "Sistema de gestión interna",
 };
 
 export default function RootLayout({
@@ -18,13 +18,12 @@ export default function RootLayout({
   return (
     <html lang="es">
       <body className={inter.className}>
-        {/* Envolvemos la app en el AuthProvider, pero OJO:
-            El AuthProvider tiene lógica de redirección cliente.
-            Para rutas públicas (login) esto se maneja internamente. */}
-        <div className="bg-gray-50 min-h-screen text-gray-900">
-           {children}
-        </div>
+        {/* Envolvemos toda la app para que la sesión funcione en todas partes */}
+        <AuthProvider>
+          {children}
+        </AuthProvider>
       </body>
     </html>
   );
 }
+
