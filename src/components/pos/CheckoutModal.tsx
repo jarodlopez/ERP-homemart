@@ -10,6 +10,9 @@ interface Props {
   onSuccess: () => void;
 }
 
+// Bancos de Nicaragua
+const BANKS = ['BAC Credomatic', 'Banpro', 'Lafise Bancentro', 'Ficohsa', 'BDF', 'Avanz', 'Otro'];
+
 export default function CheckoutModal({ session, onClose, onSuccess }: Props) {
   const { cart, getTotal, clearCart } = usePosStore();
   const total = getTotal();
@@ -17,11 +20,15 @@ export default function CheckoutModal({ session, onClose, onSuccess }: Props) {
   // Estados del Formulario
   const [step, setStep] = useState<'details' | 'success'>('details');
   const [loading, setLoading] = useState(false);
-  const [saleResult, setSaleResult] = useState<any>(null);
+  
+  // Guardamos la venta finalizada aquí para que no se pierda al borrar el carrito
+  const [finalizedSale, setFinalizedSale] = useState<any>(null);
 
   // Datos de Pago
   const [paymentMethod, setPaymentMethod] = useState('cash'); // cash, transfer, card
   const [amountReceived, setAmountReceived] = useState(total.toString());
+  const [bankName, setBankName] = useState('');
+  const [referenceNumber, setReferenceNumber] = useState('');
   
   // Datos Cliente / Delivery
   const [isDelivery, setIsDelivery] = useState(false);
@@ -35,15 +42,18 @@ export default function CheckoutModal({ session, onClose, onSuccess }: Props) {
   const change = Number(amountReceived) - finalTotal;
 
   const handleProcessSale = async () => {
-    // Validación básica de efectivo
-    if (Number(amountReceived) < finalTotal && paymentMethod === 'cash') {
+    // Validaciones
+    if (paymentMethod === 'cash' && Number(amountReceived) < finalTotal) {
       alert("El monto recibido es menor al total.");
       return;
+    }
+    if ((paymentMethod === 'card' || paymentMethod === 'transfer') && (!bankName || !referenceNumber)) {
+        alert("Selecciona el banco e ingresa el número de referencia.");
+        return;
     }
 
     setLoading(true);
     
-    // Preparar objeto de venta
     const saleData = {
       session: { id: session.id, userId: session.userId, userName: session.userName },
       cart,
@@ -61,30 +71,42 @@ export default function CheckoutModal({ session, onClose, onSuccess }: Props) {
       payment: {
         method: paymentMethod,
         amountReceived: Number(amountReceived),
-        change: change > 0 ? change : 0
+        change: change > 0 ? change : 0,
+        bank: paymentMethod !== 'cash' ? bankName : null,
+        reference: paymentMethod !== 'cash' ? referenceNumber : null
       }
     };
 
     const result = await processSaleAction(saleData);
 
     if (result.success) {
-      setSaleResult(result);
+      // 1. Guardamos la "foto" de la venta para el recibo
+      setFinalizedSale({
+          ...saleData,
+          saleId: result.saleId // ID generado por el server (HM...)
+      });
+      
+      // 2. Limpiamos el carrito del store
+      clearCart();
+      
+      // 3. Pasamos a pantalla de éxito
       setStep('success');
-      clearCart(); // Limpiar carrito Zustand
     } else {
-      // CORRECCIÓN AQUÍ: Usamos (result as any) para calmar a TypeScript
       alert(`Error: ${(result as any).error || 'Error desconocido'}`);
     }
     setLoading(false);
   };
 
   const sendWhatsApp = () => {
-    if (!saleResult) return;
+    if (!finalizedSale) return;
     
     const phone = customerPhone.replace(/\D/g, '') || '';
-    const itemsList = cart.map(i => `• ${i.quantity}x ${i.name}`).join('%0A');
     
-    const message = `👋 Hola ${customerName || 'Cliente'}, gracias por tu compra en HomeMart!%0A%0A🧾 *Orden:* ${saleResult.saleId}%0A${itemsList}%0A%0A💰 *Total:* C$ ${finalTotal.toFixed(2)}`;
+    // Construimos la lista de productos
+    const itemsList = finalizedSale.cart.map((i:any) => `• ${i.quantity}x ${i.name} (C$ ${i.price})`).join('%0A');
+    
+    // Mensaje formateado
+    const message = `👋 Hola *${customerName || 'Cliente'}*, gracias por tu compra en HomeMart!%0A%0A🧾 *Orden:* ${finalizedSale.saleId}%0A📅 *Fecha:* ${new Date().toLocaleDateString()}%0A%0A📦 *Detalle:*%0A${itemsList}%0A%0A🚚 *Envío:* C$ ${Number(deliveryFee).toFixed(2)}%0A💰 *TOTAL PAGADO: C$ ${finalTotal.toFixed(2)}*`;
     
     const url = phone.length > 7 
       ? `https://wa.me/505${phone}?text=${message}` 
@@ -100,26 +122,39 @@ export default function CheckoutModal({ session, onClose, onSuccess }: Props) {
         <div className="bg-white w-full max-w-sm rounded-3xl p-8 text-center shadow-2xl relative overflow-hidden">
           <div className="absolute top-0 left-0 w-full h-2 bg-green-500"></div>
           
-          <div className="w-20 h-20 bg-green-100 text-green-600 rounded-full flex items-center justify-center text-4xl mx-auto mb-4 shadow-sm">
+          <div className="w-20 h-20 bg-green-100 text-green-600 rounded-full flex items-center justify-center text-4xl mx-auto mb-4 shadow-sm animate-bounce">
             ✅
           </div>
           
           <h2 className="text-2xl font-black text-gray-800 mb-1">¡Venta Exitosa!</h2>
           <p className="text-gray-500 text-sm font-mono bg-gray-100 py-1 px-3 rounded-lg inline-block mb-6">
-            {saleResult?.saleId}
+            {finalizedSale?.saleId}
           </p>
+          
+          <div className="text-left bg-gray-50 p-4 rounded-xl mb-6 text-sm">
+             <div className="flex justify-between mb-1">
+                 <span className="text-gray-500">Total Pagado:</span>
+                 <span className="font-bold text-gray-800">C$ {finalTotal.toFixed(2)}</span>
+             </div>
+             {finalizedSale?.payment?.method !== 'cash' && (
+                 <div className="flex justify-between text-xs">
+                     <span className="text-gray-400">Ref:</span>
+                     <span className="text-gray-600">{finalizedSale?.payment?.reference}</span>
+                 </div>
+             )}
+          </div>
 
           <div className="grid gap-3">
             <button 
               onClick={sendWhatsApp}
-              className="w-full bg-green-600 text-white font-bold py-3.5 rounded-xl shadow-lg shadow-green-200 hover:bg-green-700 transition flex items-center justify-center gap-2"
+              className="w-full bg-green-600 text-white font-bold py-3.5 rounded-xl shadow-lg shadow-green-200 hover:bg-green-700 transition flex items-center justify-center gap-2 active:scale-95"
             >
               <span>📱 Enviar Recibo WhatsApp</span>
             </button>
             
             <button 
               onClick={onSuccess} 
-              className="w-full bg-gray-100 text-gray-700 font-bold py-3.5 rounded-xl hover:bg-gray-200 transition"
+              className="w-full bg-gray-100 text-gray-700 font-bold py-3.5 rounded-xl hover:bg-gray-200 transition active:scale-95"
             >
               🔄 Nueva Venta
             </button>
@@ -201,11 +236,11 @@ export default function CheckoutModal({ session, onClose, onSuccess }: Props) {
             )}
           </div>
 
-          {/* 3. Pago */}
+          {/* 3. Pago y Bancos */}
           <div className="space-y-3 pt-2 border-t border-gray-100">
-            <h3 className="text-xs font-bold text-gray-400 uppercase">Pago</h3>
+            <h3 className="text-xs font-bold text-gray-400 uppercase">Método de Pago</h3>
             
-            <div className="grid grid-cols-3 gap-2 mb-2">
+            <div className="grid grid-cols-3 gap-2 mb-4">
                {['cash', 'card', 'transfer'].map(m => (
                  <button
                    key={m}
@@ -219,7 +254,34 @@ export default function CheckoutModal({ session, onClose, onSuccess }: Props) {
                ))}
             </div>
 
-            <div className="flex justify-between items-center bg-gray-50 p-4 rounded-xl border border-gray-200">
+            {/* CAMPOS DE BANCO Y REFERENCIA (Si no es efectivo) */}
+            {paymentMethod !== 'cash' && (
+                <div className="bg-blue-50 p-3 rounded-xl space-y-3 border border-blue-100 animate-in fade-in">
+                    <div>
+                        <label className="text-[10px] font-bold text-blue-500 uppercase block mb-1">Banco</label>
+                        <select 
+                            value={bankName}
+                            onChange={(e) => setBankName(e.target.value)}
+                            className="w-full p-2 rounded-lg border border-blue-200 text-sm bg-white"
+                        >
+                            <option value="">Selecciona Banco...</option>
+                            {BANKS.map(b => <option key={b} value={b}>{b}</option>)}
+                        </select>
+                    </div>
+                    <div>
+                        <label className="text-[10px] font-bold text-blue-500 uppercase block mb-1">N° Comprobante / Ref</label>
+                        <input 
+                            type="text" 
+                            placeholder="Ej: 123456"
+                            value={referenceNumber}
+                            onChange={(e) => setReferenceNumber(e.target.value)}
+                            className="w-full p-2 rounded-lg border border-blue-200 text-sm"
+                        />
+                    </div>
+                </div>
+            )}
+
+            <div className="flex justify-between items-center bg-gray-50 p-4 rounded-xl border border-gray-200 mt-2">
                <div>
                  <p className="text-xs text-gray-500 mb-1">Total a Pagar</p>
                  <p className="text-2xl font-black text-gray-900">C$ {finalTotal.toFixed(2)}</p>
@@ -257,7 +319,7 @@ export default function CheckoutModal({ session, onClose, onSuccess }: Props) {
             disabled={loading || (paymentMethod === 'cash' && change < 0)}
             className="w-full bg-blue-600 text-white font-bold py-4 rounded-xl shadow-lg hover:bg-blue-700 transition active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {loading ? 'Procesando Venta...' : `Confirmar C$ ${finalTotal.toFixed(2)}`}
+            {loading ? 'Procesando...' : `Confirmar C$ ${finalTotal.toFixed(2)}`}
           </button>
         </div>
 
@@ -265,4 +327,4 @@ export default function CheckoutModal({ session, onClose, onSuccess }: Props) {
     </div>
   );
 }
-
+ 
