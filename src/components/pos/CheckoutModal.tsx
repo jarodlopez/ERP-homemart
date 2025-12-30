@@ -26,7 +26,7 @@ export default function CheckoutModal({ session, onClose, onSuccess }: Props) {
   // Datos Cliente / Delivery
   const [isDelivery, setIsDelivery] = useState(false);
   const [customerName, setCustomerName] = useState('');
-  const [customerPhone, setCustomerPhone] = useState(''); // Importante para WhatsApp
+  const [customerPhone, setCustomerPhone] = useState('');
   const [address, setAddress] = useState('');
   const [deliveryFee, setDeliveryFee] = useState('0');
 
@@ -35,6 +35,7 @@ export default function CheckoutModal({ session, onClose, onSuccess }: Props) {
   const change = Number(amountReceived) - finalTotal;
 
   const handleProcessSale = async () => {
+    // Validación básica de efectivo
     if (Number(amountReceived) < finalTotal && paymentMethod === 'cash') {
       alert("El monto recibido es menor al total.");
       return;
@@ -71,7 +72,8 @@ export default function CheckoutModal({ session, onClose, onSuccess }: Props) {
       setStep('success');
       clearCart(); // Limpiar carrito Zustand
     } else {
-      alert(`Error: ${result.error}`);
+      // CORRECCIÓN AQUÍ: Usamos (result as any) para calmar a TypeScript
+      alert(`Error: ${(result as any).error || 'Error desconocido'}`);
     }
     setLoading(false);
   };
@@ -79,12 +81,11 @@ export default function CheckoutModal({ session, onClose, onSuccess }: Props) {
   const sendWhatsApp = () => {
     if (!saleResult) return;
     
-    const phone = customerPhone.replace(/\D/g, '') || ''; // Limpiar número
+    const phone = customerPhone.replace(/\D/g, '') || '';
     const itemsList = cart.map(i => `• ${i.quantity}x ${i.name}`).join('%0A');
     
     const message = `👋 Hola ${customerName || 'Cliente'}, gracias por tu compra en HomeMart!%0A%0A🧾 *Orden:* ${saleResult.saleId}%0A${itemsList}%0A%0A💰 *Total:* C$ ${finalTotal.toFixed(2)}`;
     
-    // Si hay teléfono del cliente usamos ese, sino abre WA genérico para buscar contacto
     const url = phone.length > 7 
       ? `https://wa.me/505${phone}?text=${message}` 
       : `https://wa.me/?text=${message}`;
@@ -117,7 +118,7 @@ export default function CheckoutModal({ session, onClose, onSuccess }: Props) {
             </button>
             
             <button 
-              onClick={onSuccess} // Cierra todo y vuelve al POS limpio
+              onClick={onSuccess} 
               className="w-full bg-gray-100 text-gray-700 font-bold py-3.5 rounded-xl hover:bg-gray-200 transition"
             >
               🔄 Nueva Venta
@@ -264,3 +265,4 @@ export default function CheckoutModal({ session, onClose, onSuccess }: Props) {
     </div>
   );
 }
+
