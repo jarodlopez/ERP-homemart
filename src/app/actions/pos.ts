@@ -16,7 +16,7 @@ import {
 } from 'firebase/firestore';
 import { revalidatePath } from 'next/cache';
 
-// --- 1. VERIFICAR SESIÓN ACTIVA (SERIALIZACIÓN MANUAL) ---
+// --- 1. VERIFICAR SESIÓN (FIX: SERIALIZACIÓN) ---
 export async function checkActiveSession(userId: string) {
   try {
     const q = query(collection(db, 'cash_sessions'), where('userId', '==', userId), where('status', '==', 'open'));
@@ -26,7 +26,7 @@ export async function checkActiveSession(userId: string) {
       const d = snapshot.docs[0];
       const data = d.data();
       
-      // RETORNO EXPLÍCITO: Evitamos "...data" para no enviar Timestamps ocultos
+      // Retornamos objeto limpio sin Timestamps
       return { 
         id: d.id, 
         readableId: data.readableId || '', 
@@ -36,8 +36,6 @@ export async function checkActiveSession(userId: string) {
         status: data.status,
         salesCount: Number(data.salesCount) || 0,
         totalSales: Number(data.totalSales) || 0,
-        
-        // Convertimos fechas a números (milisegundos)
         openedAt: data.openedAt instanceof Timestamp ? data.openedAt.toMillis() : Date.now()
       };
     }
@@ -48,7 +46,7 @@ export async function checkActiveSession(userId: string) {
   }
 }
 
-// --- 2. ABRIR CAJA (LÓGICA ORIGINAL RESTAURADA) ---
+// --- 2. ABRIR CAJA (LÓGICA CONTADORES RESTAURADA) ---
 export async function openSessionAction(formData: FormData) {
   const userId = formData.get('userId') as string;
   const userName = formData.get('userName') as string;
@@ -61,7 +59,7 @@ export async function openSessionAction(formData: FormData) {
 
   try {
     await runTransaction(db, async (transaction) => {
-      // 1. Contador Diario
+      // Contador Diario
       const dateStr = new Date().toISOString().slice(2, 10).replace(/-/g, ''); 
       const counterRef = doc(db, 'counters', `sessions_${dateStr}`);
       const counterDoc = await transaction.get(counterRef);
@@ -71,17 +69,17 @@ export async function openSessionAction(formData: FormData) {
         newCount = counterDoc.data().count + 1;
       }
 
-      // 2. ID Legible (CS250102-001)
+      // ID Legible (CS250102-001)
       const readableId = `CS${dateStr}-${String(newCount).padStart(3, '0')}`;
 
-      // 3. Actualizar Contador
+      // Actualizar Contador
       if (counterDoc.exists()) {
         transaction.update(counterRef, { count: increment(1) });
       } else {
         transaction.set(counterRef, { count: 1 });
       }
 
-      // 4. Crear Sesión
+      // Crear Sesión
       const sessionRef = doc(collection(db, 'cash_sessions'));
       transaction.set(sessionRef, {
         readableId,
@@ -109,14 +107,14 @@ export async function openSessionAction(formData: FormData) {
   }
 }
 
-// --- 3. BUSCAR PRODUCTOS (SERIALIZACIÓN MANUAL Y TIPADO) ---
+// --- 3. BUSCAR PRODUCTOS (FIX: TIPO EXPLÍCITO) ---
 export async function searchProductsAction(term: string) {
   if (!term || term.length < 2) return [];
   try {
     const snapshot = await getDocs(collection(db, 'skus'));
     const termLower = term.toLowerCase();
     
-    // Mapeo seguro para evitar errores en el frontend
+    // Mapeo explícito para que TypeScript reconozca 'name'
     const allProducts = snapshot.docs.map(doc => {
       const d = doc.data();
       return { 
@@ -126,17 +124,13 @@ export async function searchProductsAction(term: string) {
         barcode: String(d.barcode || ''),
         brand: String(d.brand || ''),
         category: String(d.category || ''),
-        // Buscamos imagen donde sea que esté
         image: d.image || d.imageUrl || (d.images && d.images[0]) || null,
-        
-        // Forzamos números
         price: Number(d.price) || 0,
         stock: Number(d.stock) || 0
       };
     });
 
-    // Filtramos
-    const results = allProducts.filter(item => (
+    return allProducts.filter(item => (
         (item.name.toLowerCase().includes(termLower)) ||
         (item.sku.toLowerCase().includes(termLower)) ||
         (item.barcode.includes(term)) ||
@@ -144,15 +138,12 @@ export async function searchProductsAction(term: string) {
         (item.category.toLowerCase().includes(termLower))
     )).slice(0, 20);
 
-    return results;
-
   } catch (e) {
-    console.error(e);
     return [];
   }
 }
 
-// --- 4. PROCESAR VENTA (SIN CAMBIOS EN LÓGICA, SOLO TIPOS) ---
+// --- 4. PROCESAR VENTA ---
 export async function processSaleAction(data: any) {
   const { session, cart, totals, customer, payment } = data;
   
@@ -202,7 +193,6 @@ export async function processSaleAction(data: any) {
     });
     return res;
   } catch (e: any) {
-    console.error("Error processing sale:", e);
     return { success: false, error: e.message };
   }
 }
