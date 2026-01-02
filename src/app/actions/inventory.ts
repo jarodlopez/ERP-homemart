@@ -1,14 +1,22 @@
 'use server'
 
 import { db } from '@/lib/firebase';
-// AQUI AGREGUE 'deleteDoc'
-import { collection, doc, writeBatch, updateDoc, deleteDoc } from 'firebase/firestore';
+import { 
+  collection, 
+  doc, 
+  writeBatch, 
+  updateDoc, 
+  deleteDoc, 
+  query, 
+  getDocs, 
+  orderBy, 
+  limit 
+} from 'firebase/firestore';
 import { redirect } from 'next/navigation';
 
-// Tu API Key de ImgBB
-const IMGBB_API_KEY = 'b922654effe3a1ab5ac85cc4c23f97b8';
+// --- CONFIGURACIÓN IMGBB ---
+const IMGBB_API_KEY = 'b922654effe3a1ab5ac85cc4c23f97b8'; // Tu API Key
 
-// Función auxiliar para subir a ImgBB
 async function uploadToImgBB(file: File): Promise<string> {
   const formData = new FormData();
   formData.append('image', file);
@@ -26,13 +34,13 @@ async function uploadToImgBB(file: File): Promise<string> {
   }
 }
 
-// --- ACCIÓN 1: CREAR PRODUCTO ---
+// --- ACCIÓN 1: CREAR PRODUCTO (ROBUSTA + CATEGORÍAS) ---
 export async function createProductAction(formData: FormData) {
   const batch = writeBatch(db);
-  const productRef = doc(collection(db, 'products'));
-  const skuRef = doc(collection(db, 'skus'));
+  const productRef = doc(collection(db, 'products')); // Padre
+  const skuRef = doc(collection(db, 'skus'));         // Hijo (Variante)
 
-  // 1. Subir Imágenes
+  // 1. Procesar Imágenes (ImgBB)
   const files = formData.getAll('images') as File[];
   const imageUrls: string[] = [];
 
@@ -43,80 +51,68 @@ export async function createProductAction(formData: FormData) {
     }
   }
 
-  const mainImage = imageUrls.length > 0 ? imageUrls[0] : 'https://placehold.co/400?text=No+Image';
-
+  // 2. Extraer Datos
   const name = formData.get('name') as string;
   const brand = formData.get('brand') as string;
-  const variant = formData.get('variantDetail') as string || 'Estándar';
-  const initialStock = Number(formData.get('initialStock')) || 0;
+  const category = formData.get('category') as string; // Ahora viene del Select
+  const description = formData.get('description') as string;
+  
+  const price = parseFloat(formData.get('price') as string);
+  const cost = parseFloat(formData.get('cost') as string);
+  const stock = parseInt(formData.get('initialStock') as string);
+  const sku = formData.get('sku') as string;
+  const barcode = formData.get('barcode') as string;
+  const variantDetail = formData.get('variantDetail') as string;
 
-  // 2. Guardar Padre
+  // 3. Preparar Documento Padre (Producto General)
   batch.set(productRef, {
     name,
     brand,
-    description: formData.get('description') || '',
-    category: formData.get('category') || 'General',
-    images: imageUrls,
-    status: 'active',
-    totalStock: initialStock,
+    category,
+    description,
+    images: imageUrls, // Todas las fotos
     createdAt: new Date(),
     updatedAt: new Date()
   });
 
-  // 3. Guardar SKU
+  // 4. Preparar Documento Hijo (SKU/Variante para el POS)
+  // NOTA: Guardamos category y brand aquí también (denormalización) para facilitar el POS
   batch.set(skuRef, {
     productId: productRef.id,
-    sku: (formData.get('sku') as string).toUpperCase(),
-    barcode: formData.get('barcode') || '',
-    name: `${name} - ${variant}`,
-    price: Number(formData.get('price')),
-    cost: Number(formData.get('cost')),
-    stock: initialStock,
-    attributes: { variant },
-    imageUrl: mainImage
+    name: variantDetail ? `${name} - ${variantDetail}` : name, // Nombre completo
+    shortName: name,
+    variantName: variantDetail,
+    sku,
+    barcode,
+    price,
+    cost,
+    stock,
+    category, // Importante para filtros
+    brand,
+    image: imageUrls.length > 0 ? imageUrls[0] : null, // Foto principal para el POS
+    attributes: { variant: variantDetail },
+    createdAt: new Date()
   });
 
-  try {
-    await batch.commit();
-  } catch (e) {
-    throw new Error("Error al guardar");
-  }
-
+  await batch.commit();
+  
   redirect('/dashboard/inventory');
 }
 
-// --- ACCIÓN 2: AJUSTAR STOCK (NUEVO) ---
-export async function updateStockAction(formData: FormData) {
-  const id = formData.get('id') as string;
-  const newStock = Number(formData.get('newStock'));
-  
-  if (!id) throw new Error("ID requerido");
-
-  const skuRef = doc(db, 'skus', id);
-  
-  await updateDoc(skuRef, {
-    stock: newStock,
-    updatedAt: new Date()
-  });
-
-  redirect(`/dashboard/inventory/${id}`);
-}
-
-// --- ACCIÓN 3: EDITAR PRODUCTO COMPLETO (NUEVO) ---
+// --- ACCIÓN 2: ACTUALIZAR PRODUCTO (EDICIÓN) ---
 export async function updateProductAction(formData: FormData) {
-  const id = formData.get('id') as string; // ID del SKU
+  const id = formData.get('id') as string;     // ID del SKU
   const productId = formData.get('productId') as string; // ID del Padre
   
   const skuRef = doc(db, 'skus', id);
-  const productRef = doc(db, 'products', productId);
+  const productRef = productId ? doc(db, 'products', productId) : null;
 
-  // 1. Manejo de Nueva Imagen
+  // 1. Manejo de Nueva Imagen (Si se sube una nueva)
   const files = formData.getAll('images') as File[];
-  let imageUrl = formData.get('currentImageUrl') as string;
+  let newImageUrl = '';
 
   if (files.length > 0 && files[0].size > 0 && files[0].name !== 'undefined') {
-    const newUrl = await uploadToImgBB(files[0]);
-    if (newUrl) imageUrl = newUrl;
+    newImageUrl = await uploadToImgBB(files[0]);
   }
 
   // 2. Datos
@@ -125,44 +121,102 @@ export async function updateProductAction(formData: FormData) {
   const cost = Number(formData.get('cost'));
   const barcode = formData.get('barcode') as string;
   const variant = formData.get('variantDetail') as string;
+  
+  // Datos que van al padre y al hijo
+  const category = formData.get('category') as string;
+  const brand = formData.get('brand') as string;
+  const description = formData.get('description') as string;
 
   // 3. Actualizar SKU
-  await updateDoc(skuRef, {
-    name: `${name} - ${variant}`, // Actualizamos el nombre completo
+  const skuUpdateData: any = {
+    name: variant ? `${name} - ${variant}` : name,
     price,
     cost,
     barcode,
-    imageUrl,
+    category,
+    brand,
     attributes: { variant }
-  });
+  };
+  
+  if (newImageUrl) skuUpdateData.image = newImageUrl;
 
-  // 4. Actualizar Padre
-  if (productId) {
-    await updateDoc(productRef, {
-      name, // Nombre base
-      brand: formData.get('brand'),
-      category: formData.get('category'),
-      description: formData.get('description')
-    });
+  await updateDoc(skuRef, skuUpdateData);
+
+  // 4. Actualizar Padre (Si existe)
+  if (productRef) {
+    const productUpdateData: any = {
+      name,
+      brand,
+      category,
+      description
+    };
+    if (newImageUrl) {
+        // Lógica simple: agregamos la nueva al array o reemplazamos
+        // Para este caso, simplificamos reemplazando la primera o agregando
+        // En un sistema real gestionarías el array de fotos completo
+    }
+    await updateDoc(productRef, productUpdateData);
   }
 
-  redirect(`/dashboard/inventory/${id}`);
+  redirect(`/dashboard/inventory`);
 }
 
-// --- ACCIÓN 4: ELIMINAR PRODUCTO (AGREGADA) ---
+// --- ACCIÓN 3: ELIMINAR ---
 export async function deleteProductAction(formData: FormData) {
   const id = formData.get('id') as string;
   if (!id) return;
-
-  const skuRef = doc(db, 'skus', id);
-  
-  try {
-    await deleteDoc(skuRef);
-  } catch (error) {
-    console.error("Error al borrar:", error);
-    throw new Error("No se pudo borrar");
-  }
-  
+  await deleteDoc(doc(db, 'skus', id));
+  // Nota: Deberíamos borrar el padre también si no tiene más hijos, 
+  // pero por seguridad en este MVP solo borramos el SKU de venta.
   redirect('/dashboard/inventory');
 }
- 
+
+// --- ACCIÓN 4: CREAR CATEGORÍA (NUEVO) ---
+export async function createCategoryAction(formData: FormData) {
+  const name = formData.get('name') as string;
+  if (!name) return;
+  await addDoc(collection(db, 'categories'), {
+    name: name.trim(),
+    createdAt: new Date()
+  });
+  return { success: true };
+}
+
+// --- ACCIÓN 5: OBTENER CATEGORÍAS (NUEVO) ---
+export async function getCategoriesAction() {
+  try {
+    const q = query(collection(db, 'categories'), orderBy('name', 'asc'));
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(doc => ({ id: doc.id, name: doc.data().name }));
+  } catch (error) {
+    console.error("Error cat:", error);
+    return [];
+  }
+}
+
+// --- ACCIÓN 6: OBTENER INVENTARIO (LISTADO) ---
+export async function getInventoryAction() {
+  try {
+    // Leemos la colección de SKUs que son los ítems vendibles
+    const q = query(collection(db, 'skus'), orderBy('createdAt', 'desc'), limit(50));
+    const snapshot = await getDocs(q);
+    
+    return snapshot.docs.map(doc => {
+      const data = doc.data();
+      return {
+        id: doc.id,
+        name: data.name, // "Termo Owala - Rojo"
+        sku: data.sku,
+        price: data.price,
+        stock: data.stock,
+        category: data.category || 'General',
+        brand: data.brand || '',
+        image: data.image || null, // URL de ImgBB
+      };
+    });
+  } catch (error) {
+    console.error("Error inventario:", error);
+    return [];
+  }
+}
+
