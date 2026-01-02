@@ -3,7 +3,6 @@
 import { db } from '@/lib/firebase';
 import { 
   collection, 
-  addDoc, 
   query, 
   where, 
   getDocs, 
@@ -12,34 +11,36 @@ import {
   doc, 
   increment,
   updateDoc,
-  getDoc
+  getDoc,
+  addDoc
 } from 'firebase/firestore';
 import { revalidatePath } from 'next/cache';
 
-// --- 1. VERIFICAR SESIÓN ACTIVA (IGUAL QUE ANTES) ---
+// --- 1. VERIFICAR SESIÓN ACTIVA (FIX: Serialización de Fecha) ---
 export async function checkActiveSession(userId: string) {
   try {
     const q = query(collection(db, 'cash_sessions'), where('userId', '==', userId), where('status', '==', 'open'));
     const snapshot = await getDocs(q);
+    
     if (!snapshot.empty) {
-      const doc = snapshot.docs[0];
-      const data = doc.data();
-      // Aseguramos que se retornen todos los campos clave
+      const d = snapshot.docs[0];
+      const data = d.data();
+      
+      // IMPORTANTE: Convertimos Timestamp a milisegundos para que Next.js no de error
       return { 
-        id: doc.id, 
+        id: d.id, 
         ...data, 
-        openedAt: data.openedAt ? data.openedAt.toMillis() : Date.now() 
+        openedAt: data.openedAt instanceof Timestamp ? data.openedAt.toMillis() : Date.now() 
       };
     }
     return null;
   } catch (error) {
-    console.error("Error verificando sesión:", error);
+    console.error("Error checking session:", error);
     return null;
   }
 }
 
 // --- 2. ABRIR CAJA (LÓGICA ORIGINAL RESTAURADA) ---
-// Esta es la versión correcta que usa transacciones y contadores
 export async function openSessionAction(formData: FormData) {
   const userId = formData.get('userId') as string;
   const userName = formData.get('userName') as string;
@@ -47,43 +48,42 @@ export async function openSessionAction(formData: FormData) {
 
   if (!userId) throw new Error("Usuario requerido");
 
-  // Verificación previa (opcional, la transacción lo maneja mejor)
+  // Validar si ya existe
   const active = await checkActiveSession(userId);
   if (active) throw new Error("Ya tienes caja abierta");
 
   try {
     await runTransaction(db, async (transaction) => {
-      // 1. Obtener contador diario
+      // 1. Contador Diario (CS-YYMMDD-XXX)
       const dateStr = new Date().toISOString().slice(2, 10).replace(/-/g, ''); // YYMMDD
       const counterRef = doc(db, 'counters', `sessions_${dateStr}`);
       const counterDoc = await transaction.get(counterRef);
 
-      // 2. Calcular nuevo número
       let newCount = 1;
       if (counterDoc.exists()) {
         newCount = counterDoc.data().count + 1;
       }
 
-      // 3. Generar ID legible
+      // 2. Generar ID Legible
       const readableId = `CS${dateStr}-${String(newCount).padStart(3, '0')}`;
 
-      // 4. Actualizar contador
+      // 3. Actualizar Contador
       if (counterDoc.exists()) {
         transaction.update(counterRef, { count: increment(1) });
       } else {
         transaction.set(counterRef, { count: 1 });
       }
 
-      // 5. Crear sesión con TODOS los datos correctos
+      // 4. Crear Sesión
       const sessionRef = doc(collection(db, 'cash_sessions'));
       transaction.set(sessionRef, {
-        readableId,        // <-- ESTO FALTABA
-        sessionNumber: newCount, // <-- ESTO FALTABA
+        readableId,
+        sessionNumber: newCount,
         userId,
         userName,
-        openedAt: Timestamp.now(),
-        status: 'open',
         initialCash,
+        openedAt: Timestamp.now(), // Se guarda como Timestamp en DB
+        status: 'open',
         salesCount: 0,
         totalSales: 0,
         finalCash: null,
@@ -92,133 +92,131 @@ export async function openSessionAction(formData: FormData) {
         closedAt: null
       });
     });
-    
+
     revalidatePath('/dashboard/sales');
+    return { success: true };
+
   } catch (error) {
-    console.error("Error abriendo sesión:", error);
-    throw new Error("Error al abrir la caja");
+    console.error("Error opening session:", error);
+    throw new Error("No se pudo abrir la caja");
   }
 }
 
-// --- 3. BUSCAR PRODUCTOS (SEGURA) ---
+// --- 3. BUSCAR PRODUCTOS (POS) ---
 export async function searchProductsAction(term: string) {
   if (!term || term.length < 2) return [];
-
   try {
-    const productsRef = collection(db, 'skus');
-    const snapshot = await getDocs(productsRef);
+    const snapshot = await getDocs(collection(db, 'skus'));
     const termLower = term.toLowerCase();
-
-    const results = snapshot.docs
-      .map(doc => ({ id: doc.id, ...doc.data() } as any))
-      .filter(item => {
-        return (
-          (item.name && item.name.toLowerCase().includes(termLower)) ||
-          (item.sku && item.sku.toLowerCase().includes(termLower)) ||
-          (item.barcode && item.barcode.includes(term)) ||
-          // Protección contra nulos en campos nuevos
-          (item.category && item.category.toLowerCase().includes(termLower)) ||
-          (item.brand && item.brand.toLowerCase().includes(termLower))
-        );
+    
+    // Filtrado en memoria seguro
+    return snapshot.docs
+      .map(doc => {
+        const d = doc.data();
+        return { 
+          id: doc.id, 
+          ...d,
+          // Aseguramos que price y stock sean números
+          price: Number(d.price) || 0,
+          stock: Number(d.stock) || 0
+        };
       })
-      .slice(0, 15);
-
-    return results;
-  } catch (error) {
-    console.error("Error buscando productos:", error);
+      .filter((item: any) => (
+        (item.name?.toLowerCase().includes(termLower)) ||
+        (item.sku?.toLowerCase().includes(termLower)) ||
+        (item.barcode?.includes(term)) ||
+        (item.brand?.toLowerCase().includes(termLower)) || 
+        (item.category?.toLowerCase().includes(termLower))
+      ))
+      .slice(0, 20);
+  } catch (e) {
     return [];
   }
 }
 
-// --- 4. PROCESAR VENTA (LÓGICA ORIGINAL) ---
+// --- 4. PROCESAR VENTA (POS) ---
 export async function processSaleAction(data: any) {
   const { session, cart, totals, customer, payment } = data;
-  if (!session?.id || cart.length === 0) throw new Error("Datos inválidos");
+  
+  if (!session?.id || cart.length === 0) return { success: false, error: "Datos incompletos" };
 
   try {
-    const saleResult = await runTransaction(db, async (transaction) => {
-      // A. Lecturas
-      const itemReads = cart.map((item:any) => transaction.get(doc(db, 'skus', item.id)));
+    const res = await runTransaction(db, async (transaction) => {
+      // Leer items
+      const itemReads = cart.map((i:any) => transaction.get(doc(db, 'skus', i.id)));
       const itemDocs = await Promise.all(itemReads);
       
+      // Leer contador ventas
       const dateStr = new Date().toISOString().slice(2, 10).replace(/-/g, '');
       const counterRef = doc(db, 'counters', `sales_${dateStr}`);
       const counterDoc = await transaction.get(counterRef);
 
-      // B. Validaciones
-      itemDocs.forEach((docSnap, index) => {
-        if (!docSnap.exists()) throw new Error(`Producto ${cart[index].name} no existe`);
-        if ((docSnap.data().stock || 0) < cart[index].quantity) {
-          throw new Error(`Stock insuficiente para ${cart[index].name}`);
+      // Validar Stock
+      itemDocs.forEach((d, idx) => {
+        if (!d.exists() || (d.data().stock || 0) < cart[idx].quantity) {
+          throw new Error(`Stock insuficiente: ${cart[idx].name}`);
         }
       });
 
-      // C. Cálculos
+      // ID Venta
       let newCount = 1;
       if (counterDoc.exists()) newCount = counterDoc.data().count + 1;
       const readableId = `HM${dateStr}-${String(newCount).padStart(3, '0')}`;
 
-      // D. Escrituras
-      cart.forEach((item: any) => {
-        transaction.update(doc(db, 'skus', item.id), { stock: increment(-item.quantity) });
-      });
-
+      // Descontar Stock
+      cart.forEach((i:any) => transaction.update(doc(db, 'skus', i.id), { stock: increment(-i.quantity) }));
+      
+      // Actualizar Contador Venta
       if (counterDoc.exists()) transaction.update(counterRef, { count: increment(1) });
       else transaction.set(counterRef, { count: 1 });
 
+      // Guardar Venta
       const saleRef = doc(collection(db, 'sales'));
       transaction.set(saleRef, {
         readableId,
         sessionId: session.id,
         userId: session.userId,
         userName: session.userName,
-        customer: customer || { name: 'Cliente General' },
-        items: cart,
-        totals,
-        payment,
+        customer, items: cart, totals, payment,
         status: 'completed',
         createdAt: Timestamp.now()
       });
 
+      // Actualizar Sesión (Caja)
       transaction.update(doc(db, 'cash_sessions', session.id), {
         salesCount: increment(1),
         totalSales: increment(totals.total)
       });
 
-      return { success: true, saleId: readableId, dbId: saleRef.id };
+      return { success: true, saleId: readableId };
     });
-    return saleResult;
-  } catch (error: any) {
-    console.error("Error venta:", error);
-    return { success: false, error: error.message };
+    return res;
+  } catch (e: any) {
+    console.error("Error processing sale:", e);
+    return { success: false, error: e.message };
   }
 }
 
-// --- 5. CERRAR CAJA (LÓGICA ORIGINAL) ---
+// --- 5. CERRAR CAJA ---
 export async function closeSessionAction(formData: FormData) {
   const sessionId = formData.get('sessionId') as string;
   const finalCash = Number(formData.get('finalCash'));
-  const notes = formData.get('notes') as string;
+  const notes = formData.get('notes');
 
-  if (!sessionId) throw new Error("Sesión requerida");
-
-  const sessionRef = doc(db, 'cash_sessions', sessionId);
-  const sessionDoc = await getDoc(sessionRef);
-
-  if (!sessionDoc.exists()) throw new Error("Sesión no encontrada");
+  const ref = doc(db, 'cash_sessions', sessionId);
+  const snap = await getDoc(ref);
   
-  const data = sessionDoc.data();
-  const expectedCash = (data.initialCash || 0) + (data.totalSales || 0); 
-  const difference = finalCash - expectedCash;
-
-  await updateDoc(sessionRef, {
-    finalCash,
-    difference,
-    notes,
-    status: 'closed',
-    closedAt: Timestamp.now()
-  });
-
-  revalidatePath('/dashboard/sales');
+  if (snap.exists()) {
+    const data = snap.data();
+    const expected = (data.initialCash || 0) + (data.totalSales || 0);
+    await updateDoc(ref, {
+      finalCash,
+      difference: finalCash - expected,
+      notes,
+      status: 'closed',
+      closedAt: Timestamp.now()
+    });
+    revalidatePath('/dashboard/sales');
+  }
 }
- 
+
