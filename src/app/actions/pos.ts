@@ -16,7 +16,7 @@ import {
 } from 'firebase/firestore';
 import { revalidatePath } from 'next/cache';
 
-// --- 1. VERIFICAR SESIÓN ACTIVA (Con Fix de Fechas) ---
+// --- 1. VERIFICAR SESIÓN ACTIVA (SERIALIZACIÓN MANUAL) ---
 export async function checkActiveSession(userId: string) {
   try {
     const q = query(collection(db, 'cash_sessions'), where('userId', '==', userId), where('status', '==', 'open'));
@@ -26,11 +26,19 @@ export async function checkActiveSession(userId: string) {
       const d = snapshot.docs[0];
       const data = d.data();
       
+      // RETORNO EXPLÍCITO: Evitamos "...data" para no enviar Timestamps ocultos
       return { 
         id: d.id, 
-        ...data, 
-        // FIX: Convertimos Timestamp a milisegundos para evitar error de serialización
-        openedAt: data.openedAt instanceof Timestamp ? data.openedAt.toMillis() : Date.now() 
+        readableId: data.readableId || '', 
+        userId: data.userId,
+        userName: data.userName,
+        initialCash: Number(data.initialCash) || 0,
+        status: data.status,
+        salesCount: Number(data.salesCount) || 0,
+        totalSales: Number(data.totalSales) || 0,
+        
+        // Convertimos fechas a números (milisegundos)
+        openedAt: data.openedAt instanceof Timestamp ? data.openedAt.toMillis() : Date.now()
       };
     }
     return null;
@@ -40,7 +48,7 @@ export async function checkActiveSession(userId: string) {
   }
 }
 
-// --- 2. ABRIR CAJA (LÓGICA ORIGINAL) ---
+// --- 2. ABRIR CAJA (LÓGICA ORIGINAL RESTAURADA) ---
 export async function openSessionAction(formData: FormData) {
   const userId = formData.get('userId') as string;
   const userName = formData.get('userName') as string;
@@ -101,26 +109,27 @@ export async function openSessionAction(formData: FormData) {
   }
 }
 
-// --- 3. BUSCAR PRODUCTOS (FIX: TIPO EXPLÍCITO) ---
+// --- 3. BUSCAR PRODUCTOS (SERIALIZACIÓN MANUAL Y TIPADO) ---
 export async function searchProductsAction(term: string) {
   if (!term || term.length < 2) return [];
   try {
     const snapshot = await getDocs(collection(db, 'skus'));
     const termLower = term.toLowerCase();
     
-    // Mapeamos explícitamente las propiedades para que TypeScript no se queje
+    // Mapeo seguro para evitar errores en el frontend
     const allProducts = snapshot.docs.map(doc => {
       const d = doc.data();
       return { 
         id: doc.id, 
-        name: String(d.name || ''),    // <-- Definimos que es string
-        sku: String(d.sku || ''),      // <-- Definimos que es string
+        name: String(d.name || 'Sin Nombre'),
+        sku: String(d.sku || ''),
         barcode: String(d.barcode || ''),
         brand: String(d.brand || ''),
         category: String(d.category || ''),
-        image: d.image || null,
+        // Buscamos imagen donde sea que esté
+        image: d.image || d.imageUrl || (d.images && d.images[0]) || null,
         
-        // Convertimos números
+        // Forzamos números
         price: Number(d.price) || 0,
         stock: Number(d.stock) || 0
       };
@@ -143,7 +152,7 @@ export async function searchProductsAction(term: string) {
   }
 }
 
-// --- 4. PROCESAR VENTA (SIN CAMBIOS) ---
+// --- 4. PROCESAR VENTA (SIN CAMBIOS EN LÓGICA, SOLO TIPOS) ---
 export async function processSaleAction(data: any) {
   const { session, cart, totals, customer, payment } = data;
   
@@ -220,4 +229,4 @@ export async function closeSessionAction(formData: FormData) {
     revalidatePath('/dashboard/sales');
   }
 }
-
+ 
