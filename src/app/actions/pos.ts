@@ -16,7 +16,7 @@ import {
 } from 'firebase/firestore';
 import { revalidatePath } from 'next/cache';
 
-// --- 1. VERIFICAR SESIÓN (FIX: SERIALIZACIÓN) ---
+// --- 1. VERIFICAR SESIÓN ---
 export async function checkActiveSession(userId: string) {
   try {
     const q = query(collection(db, 'cash_sessions'), where('userId', '==', userId), where('status', '==', 'open'));
@@ -26,7 +26,6 @@ export async function checkActiveSession(userId: string) {
       const d = snapshot.docs[0];
       const data = d.data();
       
-      // Retornamos objeto limpio sin Timestamps
       return { 
         id: d.id, 
         readableId: data.readableId || '', 
@@ -46,7 +45,7 @@ export async function checkActiveSession(userId: string) {
   }
 }
 
-// --- 2. ABRIR CAJA (LÓGICA CONTADORES RESTAURADA) ---
+// --- 2. ABRIR CAJA ---
 export async function openSessionAction(formData: FormData) {
   const userId = formData.get('userId') as string;
   const userName = formData.get('userName') as string;
@@ -59,7 +58,6 @@ export async function openSessionAction(formData: FormData) {
 
   try {
     await runTransaction(db, async (transaction) => {
-      // Contador Diario
       const dateStr = new Date().toISOString().slice(2, 10).replace(/-/g, ''); 
       const counterRef = doc(db, 'counters', `sessions_${dateStr}`);
       const counterDoc = await transaction.get(counterRef);
@@ -69,17 +67,14 @@ export async function openSessionAction(formData: FormData) {
         newCount = counterDoc.data().count + 1;
       }
 
-      // ID Legible (CS250102-001)
       const readableId = `CS${dateStr}-${String(newCount).padStart(3, '0')}`;
 
-      // Actualizar Contador
       if (counterDoc.exists()) {
         transaction.update(counterRef, { count: increment(1) });
       } else {
         transaction.set(counterRef, { count: 1 });
       }
 
-      // Crear Sesión
       const sessionRef = doc(collection(db, 'cash_sessions'));
       transaction.set(sessionRef, {
         readableId,
@@ -107,14 +102,13 @@ export async function openSessionAction(formData: FormData) {
   }
 }
 
-// --- 3. BUSCAR PRODUCTOS (FIX: TIPO EXPLÍCITO) ---
+// --- 3. BUSCAR PRODUCTOS ---
 export async function searchProductsAction(term: string) {
   if (!term || term.length < 2) return [];
   try {
     const snapshot = await getDocs(collection(db, 'skus'));
     const termLower = term.toLowerCase();
     
-    // Mapeo explícito para que TypeScript reconozca 'name'
     const allProducts = snapshot.docs.map(doc => {
       const d = doc.data();
       return { 
