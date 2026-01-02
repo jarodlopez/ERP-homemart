@@ -3,6 +3,7 @@
 import { db } from '@/lib/firebase';
 import { 
   collection, 
+  addDoc, // <--- ¡AQUÍ ESTABA EL FALTANTE!
   doc, 
   writeBatch, 
   updateDoc, 
@@ -184,7 +185,7 @@ export async function updateProductAction(formData: FormData) {
   redirect(`/dashboard/inventory`);
 }
 
-// --- 4. ACTUALIZAR STOCK RÁPIDO (LA FUNCIÓN QUE FALTABA) ---
+// --- 4. ACTUALIZAR STOCK RÁPIDO ---
 export async function updateStockAction(formData: FormData) {
   const id = formData.get('id') as string;
   const newStock = parseInt(formData.get('newStock') as string);
@@ -204,7 +205,6 @@ export async function deleteProductAction(formData: FormData) {
   if (!id) return;
   
   await deleteDoc(doc(db, 'skus', id));
-  // Opcional: Borrar padre si no tiene más hijos (Lógica avanzada para V2)
   
   revalidatePath('/dashboard/inventory');
 }
