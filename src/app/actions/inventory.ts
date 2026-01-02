@@ -10,8 +10,10 @@ import {
   query, 
   getDocs, 
   orderBy, 
-  limit 
+  limit,
+  Timestamp 
 } from 'firebase/firestore';
+import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 
 // --- CONFIGURACIÓN IMGBB ---
@@ -34,13 +36,39 @@ async function uploadToImgBB(file: File): Promise<string> {
   }
 }
 
-// --- ACCIÓN 1: CREAR PRODUCTO (ROBUSTA + CATEGORÍAS) ---
+// --- 1. OBTENER INVENTARIO (LISTADO) ---
+export async function getInventoryAction() {
+  try {
+    // Ordenamos por creación descendente para ver lo más nuevo primero
+    const q = query(collection(db, 'skus'), orderBy('createdAt', 'desc'), limit(100));
+    const snapshot = await getDocs(q);
+    
+    return snapshot.docs.map(doc => {
+      const data = doc.data();
+      return {
+        id: doc.id,
+        name: data.name, // Nombre compuesto: "Producto - Variante"
+        sku: data.sku,
+        price: data.price,
+        stock: data.stock,
+        category: data.category || 'General',
+        brand: data.brand || '',
+        image: data.image || null, // URL de ImgBB
+      };
+    });
+  } catch (error) {
+    console.error("Error inventario:", error);
+    return [];
+  }
+}
+
+// --- 2. CREAR PRODUCTO (ROBUSTA + IMGBB + CATEGORÍAS) ---
 export async function createProductAction(formData: FormData) {
   const batch = writeBatch(db);
   const productRef = doc(collection(db, 'products')); // Padre
   const skuRef = doc(collection(db, 'skus'));         // Hijo (Variante)
 
-  // 1. Procesar Imágenes (ImgBB)
+  // A. Procesar Imágenes (ImgBB)
   const files = formData.getAll('images') as File[];
   const imageUrls: string[] = [];
 
@@ -51,10 +79,10 @@ export async function createProductAction(formData: FormData) {
     }
   }
 
-  // 2. Extraer Datos
+  // B. Extraer Datos
   const name = formData.get('name') as string;
   const brand = formData.get('brand') as string;
-  const category = formData.get('category') as string; // Ahora viene del Select
+  const category = formData.get('category') as string;
   const description = formData.get('description') as string;
   
   const price = parseFloat(formData.get('price') as string);
@@ -64,22 +92,21 @@ export async function createProductAction(formData: FormData) {
   const barcode = formData.get('barcode') as string;
   const variantDetail = formData.get('variantDetail') as string;
 
-  // 3. Preparar Documento Padre (Producto General)
+  // C. Guardar Documento Padre
   batch.set(productRef, {
     name,
     brand,
     category,
     description,
-    images: imageUrls, // Todas las fotos
-    createdAt: new Date(),
-    updatedAt: new Date()
+    images: imageUrls,
+    createdAt: Timestamp.now(),
+    updatedAt: Timestamp.now()
   });
 
-  // 4. Preparar Documento Hijo (SKU/Variante para el POS)
-  // NOTA: Guardamos category y brand aquí también (denormalización) para facilitar el POS
+  // D. Guardar Documento Hijo (SKU)
   batch.set(skuRef, {
     productId: productRef.id,
-    name: variantDetail ? `${name} - ${variantDetail}` : name, // Nombre completo
+    name: variantDetail ? `${name} - ${variantDetail}` : name,
     shortName: name,
     variantName: variantDetail,
     sku,
@@ -87,19 +114,21 @@ export async function createProductAction(formData: FormData) {
     price,
     cost,
     stock,
-    category, // Importante para filtros
+    category, // Importante para filtros en POS
     brand,
-    image: imageUrls.length > 0 ? imageUrls[0] : null, // Foto principal para el POS
+    image: imageUrls.length > 0 ? imageUrls[0] : null,
     attributes: { variant: variantDetail },
-    createdAt: new Date()
+    createdAt: Timestamp.now(),
+    updatedAt: Timestamp.now()
   });
 
   await batch.commit();
   
+  revalidatePath('/dashboard/inventory');
   redirect('/dashboard/inventory');
 }
 
-// --- ACCIÓN 2: ACTUALIZAR PRODUCTO (EDICIÓN) ---
+// --- 3. ACTUALIZAR PRODUCTO (EDICIÓN COMPLETA) ---
 export async function updateProductAction(formData: FormData) {
   const id = formData.get('id') as string;     // ID del SKU
   const productId = formData.get('productId') as string; // ID del Padre
@@ -107,27 +136,25 @@ export async function updateProductAction(formData: FormData) {
   const skuRef = doc(db, 'skus', id);
   const productRef = productId ? doc(db, 'products', productId) : null;
 
-  // 1. Manejo de Nueva Imagen (Si se sube una nueva)
+  // A. Imagen nueva (si la hay)
   const files = formData.getAll('images') as File[];
   let newImageUrl = '';
-
   if (files.length > 0 && files[0].size > 0 && files[0].name !== 'undefined') {
     newImageUrl = await uploadToImgBB(files[0]);
   }
 
-  // 2. Datos
+  // B. Datos
   const name = formData.get('name') as string;
   const price = Number(formData.get('price'));
   const cost = Number(formData.get('cost'));
   const barcode = formData.get('barcode') as string;
   const variant = formData.get('variantDetail') as string;
   
-  // Datos que van al padre y al hijo
   const category = formData.get('category') as string;
   const brand = formData.get('brand') as string;
   const description = formData.get('description') as string;
 
-  // 3. Actualizar SKU
+  // C. Actualizar SKU
   const skuUpdateData: any = {
     name: variant ? `${name} - ${variant}` : name,
     price,
@@ -142,7 +169,7 @@ export async function updateProductAction(formData: FormData) {
 
   await updateDoc(skuRef, skuUpdateData);
 
-  // 4. Actualizar Padre (Si existe)
+  // D. Actualizar Padre
   if (productRef) {
     const productUpdateData: any = {
       name,
@@ -150,72 +177,59 @@ export async function updateProductAction(formData: FormData) {
       category,
       description
     };
-    if (newImageUrl) {
-        // Lógica simple: agregamos la nueva al array o reemplazamos
-        // Para este caso, simplificamos reemplazando la primera o agregando
-        // En un sistema real gestionarías el array de fotos completo
-    }
     await updateDoc(productRef, productUpdateData);
   }
 
+  revalidatePath('/dashboard/inventory');
   redirect(`/dashboard/inventory`);
 }
 
-// --- ACCIÓN 3: ELIMINAR ---
-export async function deleteProductAction(formData: FormData) {
+// --- 4. ACTUALIZAR STOCK RÁPIDO (LA FUNCIÓN QUE FALTABA) ---
+export async function updateStockAction(formData: FormData) {
   const id = formData.get('id') as string;
+  const newStock = parseInt(formData.get('newStock') as string);
+  
   if (!id) return;
-  await deleteDoc(doc(db, 'skus', id));
-  // Nota: Deberíamos borrar el padre también si no tiene más hijos, 
-  // pero por seguridad en este MVP solo borramos el SKU de venta.
+  
+  const productRef = doc(db, 'skus', id);
+  await updateDoc(productRef, { stock: newStock });
+  
+  revalidatePath('/dashboard/inventory');
   redirect('/dashboard/inventory');
 }
 
-// --- ACCIÓN 4: CREAR CATEGORÍA (NUEVO) ---
+// --- 5. ELIMINAR PRODUCTO ---
+export async function deleteProductAction(formData: FormData) {
+  const id = formData.get('id') as string;
+  if (!id) return;
+  
+  await deleteDoc(doc(db, 'skus', id));
+  // Opcional: Borrar padre si no tiene más hijos (Lógica avanzada para V2)
+  
+  revalidatePath('/dashboard/inventory');
+}
+
+// --- 6. CATEGORÍAS: CREAR ---
 export async function createCategoryAction(formData: FormData) {
   const name = formData.get('name') as string;
   if (!name) return;
+
   await addDoc(collection(db, 'categories'), {
     name: name.trim(),
-    createdAt: new Date()
+    createdAt: Timestamp.now()
   });
+  
   return { success: true };
 }
 
-// --- ACCIÓN 5: OBTENER CATEGORÍAS (NUEVO) ---
+// --- 7. CATEGORÍAS: OBTENER ---
 export async function getCategoriesAction() {
   try {
     const q = query(collection(db, 'categories'), orderBy('name', 'asc'));
     const snapshot = await getDocs(q);
     return snapshot.docs.map(doc => ({ id: doc.id, name: doc.data().name }));
   } catch (error) {
-    console.error("Error cat:", error);
-    return [];
-  }
-}
-
-// --- ACCIÓN 6: OBTENER INVENTARIO (LISTADO) ---
-export async function getInventoryAction() {
-  try {
-    // Leemos la colección de SKUs que son los ítems vendibles
-    const q = query(collection(db, 'skus'), orderBy('createdAt', 'desc'), limit(50));
-    const snapshot = await getDocs(q);
-    
-    return snapshot.docs.map(doc => {
-      const data = doc.data();
-      return {
-        id: doc.id,
-        name: data.name, // "Termo Owala - Rojo"
-        sku: data.sku,
-        price: data.price,
-        stock: data.stock,
-        category: data.category || 'General',
-        brand: data.brand || '',
-        image: data.image || null, // URL de ImgBB
-      };
-    });
-  } catch (error) {
-    console.error("Error inventario:", error);
+    console.error("Error obteniendo categorías:", error);
     return [];
   }
 }
